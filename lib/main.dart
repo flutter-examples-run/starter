@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:uhst/uhst.dart';
 
 void main() {
   runApp(MyApp());
@@ -45,18 +48,107 @@ class MyHomePage extends StatefulWidget {
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
+class _MyHomePageState extends State<MyHomePage>
+    with SingleTickerProviderStateMixin {
+  final List<Widget> _tabs = <Widget>[
+    Tab(icon: Icon(Icons.cloud_outlined), text: 'Host'),
+    Tab(icon: Icon(Icons.center_focus_strong), text: 'Join'),
+  ];
+  late TabController _tabController;
+  late Uhst uhst;
   int _counter = 0;
+  int _hostCounter = 0;
+  bool _hostReady = false;
+  bool _clientReady = false;
+  UhstHost? host;
+  UhstSocket? client;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = new TabController(vsync: this, length: _tabs.length)
+      ..addListener(() {
+        if (!_tabController.indexIsChanging) {
+          switch (_tabController.index) {
+            case 0:
+              // from client to host
+              initHost();
+              break;
+            case 1:
+              // from host to client
+              break;
+          }
+        }
+      });
+    uhst = Uhst(debug: true);
+    initHost();
+  }
+
+  void initHost() async {
+    setState(() {
+      _hostReady = false;
+    });
+    host?.disconnect();
+    host = uhst.host();
+    host
+      ?..onReady(handler: ({required String hostId}) {
+        setState(() {
+          _hostReady = true;
+        });
+        initClient(hostId);
+      })
+      ..onError(handler: ({required Error error}) {
+        print(error);
+      })
+      ..onDiagnostic(handler: ({required String message}) {
+        print(message);
+      })
+      ..onConnection(handler: ({required UhstSocket uhstSocket}) {
+        uhstSocket.onMessage(handler: ({required message}) {
+          if (message == 'increment_counter') {
+            _hostCounter++;
+            host?.broadcastString(message: jsonEncode(_hostCounter));
+          }
+        });
+        uhstSocket.onOpen(handler: () {
+          // client connected
+        });
+      });
+  }
+
+  void initClient(hostId) async {
+    setState(() {
+      _clientReady = false;
+    });
+    client?.close();
+    client = uhst.join(hostId: hostId);
+    client
+      ?..onError(handler: ({required Error error}) {
+        print(error);
+      })
+      ..onDiagnostic(handler: ({required String message}) {
+        print(message);
+      })
+      ..onOpen(handler: () {
+        setState(() {
+          _clientReady = true;
+        });
+      })
+      ..onMessage(handler: ({required message}) {
+        setState(() {
+          _counter = jsonDecode(message);
+        });
+      });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+    client?.sendString(message: 'increment_counter');
   }
 
   @override
@@ -67,68 +159,70 @@ class _MyHomePageState extends State<MyHomePage> {
     // The Flutter framework has been optimized to make rerunning build methods
     // fast, so that you can just rebuild anything that needs updating rather
     // than having to individually change instances of widgets.
-    return DefaultTabController(
-        initialIndex: 1,
-        length: 2,
-        child: Scaffold(
-          appBar: AppBar(
-            // Here we take the value from the MyHomePage object that was created by
-            // the App.build method, and use it to set our appbar title.
-            title: Text(widget.title!),
-            bottom: const TabBar(
-              tabs: <Widget>[
-                Tab(icon: Icon(Icons.cloud_outlined), text: 'Host'),
-                Tab(icon: Icon(Icons.beach_access_sharp), text: 'Join'),
-              ],
-            ),
+    return Scaffold(
+        appBar: AppBar(
+          // Here we take the value from the MyHomePage object that was created by
+          // the App.build method, and use it to set our appbar title.
+          title: Text(widget.title!),
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: _tabs,
           ),
-          body: Center(
-            // Center is a layout widget. It takes a single child and positions it
-            // in the middle of the parent.
-            child: Column(
-              // Column is also a layout widget. It takes a list of children and
-              // arranges them vertically. By default, it sizes itself to fit its
-              // children horizontally, and tries to be as tall as its parent.
-              //
-              // Invoke "debug painting" (press "p" in the console, choose the
-              // "Toggle Debug Paint" action from the Flutter Inspector in Android
-              // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-              // to see the wireframe for each widget.
-              //
-              // Column has various properties to control how it sizes itself and
-              // how it positions its children. Here we use mainAxisAlignment to
-              // center the children vertically; the main axis here is the vertical
-              // axis because Columns are vertical (the cross axis would be
-              // horizontal).
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Container(
-                    height: 200,
-                    child: TabBarView(
-                      children: <Widget>[
-                        Center(
-                          child: Text('Host QR code here'),
-                        ),
-                        Center(
-                          child: Text('QR code scanner'),
-                        )
-                      ],
-                    )),
-                Text(
-                  'You have pushed the button this many times:',
-                ),
-                Text(
-                  '$_counter',
-                  style: Theme.of(context).textTheme.headline4,
-                ),
-              ],
-            ),
+        ),
+        body: Center(
+          // Center is a layout widget. It takes a single child and positions it
+          // in the middle of the parent.
+          child: Column(
+            // Column is also a layout widget. It takes a list of children and
+            // arranges them vertically. By default, it sizes itself to fit its
+            // children horizontally, and tries to be as tall as its parent.
+            //
+            // Invoke "debug painting" (press "p" in the console, choose the
+            // "Toggle Debug Paint" action from the Flutter Inspector in Android
+            // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
+            // to see the wireframe for each widget.
+            //
+            // Column has various properties to control how it sizes itself and
+            // how it positions its children. Here we use mainAxisAlignment to
+            // center the children vertically; the main axis here is the vertical
+            // axis because Columns are vertical (the cross axis would be
+            // horizontal).
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Container(
+                  height: 200,
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: <Widget>[
+                      Center(
+                        child: Text(
+                            _hostReady ? host!.hostId : 'Host initializing...'),
+                      ),
+                      Center(
+                        child: Column(children: <Widget>[
+                          Text('QR code scanner'),
+                        ]),
+                      )
+                    ],
+                  )),
+              Text(
+                'You have pushed the button this many times:',
+              ),
+              Text(
+                '$_counter',
+                style: Theme.of(context).textTheme.headline4,
+              ),
+            ],
           ),
-          floatingActionButton: FloatingActionButton(
-            onPressed: _incrementCounter,
-            tooltip: 'Increment',
-            child: Icon(Icons.add),
-          ), // This trailing comma makes auto-formatting nicer for build methods.
-        ));
+        ),
+        floatingActionButton: _clientReady
+            ? FloatingActionButton(
+                onPressed: _incrementCounter,
+                tooltip: 'Increment',
+                child: Icon(Icons.add),
+              )
+            : null
+        // This trailing comma makes auto-formatting nicer for build methods.
+        );
   }
 }
